@@ -1,8 +1,8 @@
 # Copyright (C) 2024 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-
 import os
+import pyodbc
 
 from fastapi import HTTPException
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings, HuggingFaceInferenceAPIEmbeddings
@@ -11,7 +11,9 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from comps import CustomLogger, EmbedDoc, OpeaComponent, OpeaComponentRegistry, ServiceType
 
-from .config import EMBED_MODEL, HF_TOKEN, MSSQL_CONNECTION_STRING, SQLSERVER_INDEX_NAME, TEI_EMBEDDING_ENDPOINT
+from .config import MSSQL_SERVER, MSSQL_DATABASE, MSSQL_USERNAME, MSSQL_SA_PASSWORD, TABLE_NAME, TEI_EMBEDDING_ENDPOINT, EMBED_MODEL, HUGGINGFACEHUB_API_TOKEN
+
+MSSQL_CONNECTION_STRING = f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={MSSQL_SERVER};DATABASE={MSSQL_DATABASE};UID={MSSQL_USERNAME};PWD={MSSQL_SA_PASSWORD};TrustServerCertificate=yes"
 
 logger = CustomLogger("sqlserver_retrievers")
 logflag = os.getenv("LOGFLAG", False)
@@ -30,21 +32,21 @@ class OpeaSqlServerRetriever(OpeaComponent):
 
         self.embedder = self._initialize_embedder()
         self.MSSQL_CONNECTION_STRING = MSSQL_CONNECTION_STRING
-        self.sqlserver_index_name = SQLSERVER_INDEX_NAME
+        self.sqlserver_table_name = TABLE_NAME
         self.vector_db = self._initialize_client()
-        # health_status = self.check_health()
-        # if not health_status:
-        #     logger.error("OpeaSqlServerRetriever health check failed.")
+        health_status = self.check_health()
+        if not health_status:
+            logger.error("OpeaSqlServerRetriever health check failed.")
 
     def _initialize_embedder(self):
         if TEI_EMBEDDING_ENDPOINT:
             # create embeddings using TEI endpoint service
             if logflag:
                 logger.info(f"[ init embedder ] TEI_EMBEDDING_ENDPOINT:{TEI_EMBEDDING_ENDPOINT}")
-            if not HF_TOKEN:
+            if not HUGGINGFACEHUB_API_TOKEN:
                 raise HTTPException(
                     status_code=400,
-                    detail="You MUST offer the `HF_TOKEN` when using `TEI_EMBEDDING_ENDPOINT`.",
+                    detail="You MUST offer the `HUGGINGFACEHUB_API_TOKEN` when using `TEI_EMBEDDING_ENDPOINT`.",
                 )
             import requests
 
@@ -55,7 +57,7 @@ class OpeaSqlServerRetriever(OpeaComponent):
                 )
             model_id = response.json()["model_id"]
             embeddings = HuggingFaceInferenceAPIEmbeddings(
-                api_key=HF_TOKEN, model_name=model_id, api_url=TEI_EMBEDDING_ENDPOINT
+                api_key=HUGGINGFACEHUB_API_TOKEN, model_name=model_id, api_url=TEI_EMBEDDING_ENDPOINT
             )
         else:
             # create embeddings using local embedding model
@@ -68,8 +70,9 @@ class OpeaSqlServerRetriever(OpeaComponent):
         """Initializes the SQL server client."""
         vector_db = SQLServer_VectorStore(
             embedding_function=self.embedder,
-            table_name=self.sqlserver_index_name,
+            table_name=self.sqlserver_table_name,
             connection_string=self.MSSQL_CONNECTION_STRING,
+            embedding_length=768
         )
         return vector_db
 
@@ -82,12 +85,18 @@ class OpeaSqlServerRetriever(OpeaComponent):
         if logflag:
             logger.info("[ check health ] start to check health of SQL Server")
         try:
-            # Check the status of the SQL Server service
-            self.vector_db.create_collection()
+            conn = pyodbc.connect(MSSQL_CONNECTION_STRING)
+            conn.close()
             logger.info("[ check health ] Successfully connected to SQL Server!")
             return True
+        except pyodbc.Error as e:
+            if logflag:
+                logger.info(f"Error connecting to MS SQL: {e}")
+            return False
+
         except Exception as e:
-            logger.info(f"[ check health ] Failed to connect to SQL Server: {e}")
+            if logflag:
+                logger.info(f"An unexpected error occurred: {e}")
             return False
 
     async def invoke(self, input: EmbedDoc) -> list:

@@ -248,3 +248,13 @@ OPENAI_EMBED_ENABLED = os.getenv("OPENAI_EMBED_ENABLED", "true").lower() == "tru
 #######################################################
 MARIADB_CONNECTION_URL = os.getenv("MARIADB_CONNECTION_URL", "localhost")
 MARIADB_COLLECTION_NAME = os.getenv("MARIADB_COLLECTION_NAME", "rag_mariadbvector")
+
+#######################################################
+#                     SQL Server                      #
+#######################################################
+
+MSSQL_SERVER = os.getenv("MSSQL_SERVER", "host.docker.internal,1433")
+MSSQL_DATABASE = os.getenv("MSSQL_DATABASE", "master")
+MSSQL_USERNAME = os.getenv("MSSQL_USERNAME", "sa")
+MSSQL_SA_PASSWORD = os.getenv("MSSQL_SA_PASSWORD", "password")
+TABLE_NAME = os.getenv("TABLE_NAME", "sqlserver_vectorstore")
