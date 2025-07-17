@@ -11,7 +11,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from comps import CustomLogger, EmbedDoc, OpeaComponent, OpeaComponentRegistry, ServiceType
 
-from .config import MSSQL_SERVER, MSSQL_DATABASE, MSSQL_USERNAME, MSSQL_SA_PASSWORD, TABLE_NAME, TEI_EMBEDDING_ENDPOINT, EMBED_MODEL, HUGGINGFACEHUB_API_TOKEN
+from .config import MSSQL_SERVER, MSSQL_DATABASE, MSSQL_USERNAME, MSSQL_SA_PASSWORD, TABLE_NAME, TEI_EMBEDDING_ENDPOINT, EMBED_MODEL, HF_TOKEN
 
 MSSQL_CONNECTION_STRING = f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={MSSQL_SERVER};DATABASE={MSSQL_DATABASE};UID={MSSQL_USERNAME};PWD={MSSQL_SA_PASSWORD};TrustServerCertificate=yes"
 
@@ -43,10 +43,10 @@ class OpeaSqlServerRetriever(OpeaComponent):
             # create embeddings using TEI endpoint service
             if logflag:
                 logger.info(f"[ init embedder ] TEI_EMBEDDING_ENDPOINT:{TEI_EMBEDDING_ENDPOINT}")
-            if not HUGGINGFACEHUB_API_TOKEN:
+            if not HF_TOKEN:
                 raise HTTPException(
                     status_code=400,
-                    detail="You MUST offer the `HUGGINGFACEHUB_API_TOKEN` when using `TEI_EMBEDDING_ENDPOINT`.",
+                    detail="You MUST offer the `HF_TOKEN` when using `TEI_EMBEDDING_ENDPOINT`.",
                 )
             import requests
 
@@ -57,7 +57,7 @@ class OpeaSqlServerRetriever(OpeaComponent):
                 )
             model_id = response.json()["model_id"]
             embeddings = HuggingFaceInferenceAPIEmbeddings(
-                api_key=HUGGINGFACEHUB_API_TOKEN, model_name=model_id, api_url=TEI_EMBEDDING_ENDPOINT
+                api_key=HF_TOKEN, model_name=model_id, api_url=TEI_EMBEDDING_ENDPOINT
             )
         else:
             # create embeddings using local embedding model
@@ -83,11 +83,11 @@ class OpeaSqlServerRetriever(OpeaComponent):
             bool: True if the service is reachable and healthy, False otherwise.
         """
         if logflag:
-            logger.info("[ check health ] start to check health of SQL Server")
+            logger.info(f"[ check health ] start to check health of SQL Server")
         try:
             conn = pyodbc.connect(MSSQL_CONNECTION_STRING)
             conn.close()
-            logger.info("[ check health ] Successfully connected to SQL Server!")
+            logger.info(f"[ check health ] Successfully connected to SQL Server!")
             return True
         except pyodbc.Error as e:
             if logflag:

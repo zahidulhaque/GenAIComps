@@ -253,7 +253,7 @@ MARIADB_COLLECTION_NAME = os.getenv("MARIADB_COLLECTION_NAME", "rag_mariadbvecto
 #                     SQL Server                      #
 #######################################################
 
-MSSQL_SERVER = os.getenv("MSSQL_SERVER", "host.docker.internal,1433")
+MSSQL_SERVER = os.getenv("MSSQL_SERVER", "localhost,1433")
 MSSQL_DATABASE = os.getenv("MSSQL_DATABASE", "master")
 MSSQL_USERNAME = os.getenv("MSSQL_USERNAME", "sa")
 MSSQL_SA_PASSWORD = os.getenv("MSSQL_SA_PASSWORD", "password")

@@ -5,12 +5,11 @@ import json
 import os
 from pathlib import Path
 from typing import List, Optional, Union
-from urllib.parse import urlparse
 
 import pyodbc
 from fastapi import Body, File, Form, HTTPException, UploadFile
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings, HuggingFaceInferenceAPIEmbeddings
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from langchain_sqlserver.vectorstores import SQLServer_VectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -37,8 +36,7 @@ TEI_EMBEDDING_ENDPOINT = os.getenv("TEI_EMBEDDING_ENDPOINT", "")
 # Huggingface API token for TEI embedding endpoint
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN", "")
 
-# MSSQL_CONNECTION_STRING = os.getenv("MSSQL_CONNECTION_STRING", "localhost")
-MSSQL_SERVER = os.getenv("MSSQL_SERVER", "host.docker.internal,1433")
+MSSQL_SERVER = os.getenv("MSSQL_SERVER", "localhost,1433")
 MSSQL_DATABASE = os.getenv("MSSQL_DATABASE", "master")
 MSSQL_USERNAME = os.getenv("MSSQL_USERNAME", "sa")
 MSSQL_SA_PASSWORD = os.getenv("MSSQL_SA_PASSWORD", "password")
@@ -81,6 +79,12 @@ class OpeaSqlServerDataprep(OpeaComponent):
         else:
             # create embeddings using local embedding model
             self.embedder = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+
+        embedding = self.embedder.embed_documents(["Test input text to get embedding size"])
+        if not embedding or not isinstance(embedding[0], list):
+            raise ValueError("Embedding generation failed or invalid format.")
+        self.embedding_length = len(embedding[0])
+        logger.info(f"Embedding Length of the model: {self.embedding_length}")
 
         # Perform health check
         health_status = self.check_health()
@@ -128,7 +132,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
             vector_store = SQLServer_VectorStore(
                 embedding_function=self.embedder,
                 connection_string=MSSQL_CONNECTION_STRING,
-                embedding_length=768,
+                embedding_length=self.embedding_length,
                 table_name=TABLE_NAME,
             )
 
@@ -151,7 +155,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
                         logger.info(f"Row(s) with doc_name = '{doc_name}' deleted successfully.")
 
                 except pyodbc.Error as e:
-                    logger.info("Error while connecting or executing query:", e)
+                    logger.info(f"Error while connecting or executing query: {e}")
                     return False
             return True
         except Exception as e:
@@ -180,8 +184,8 @@ class OpeaSqlServerDataprep(OpeaComponent):
             chunks = text_splitter.split_text(content)
 
         if logflag:
-            logger.info("Done preprocessing. Created ", len(chunks), " chunks of the original file.")
-            logger.info("SQL Server Connection", MSSQL_CONNECTION_STRING)
+            logger.info(f"Done preprocessing. Created {len(chunks)} chunks of the original file.")
+            logger.info(f"SQL Server Connection: {MSSQL_CONNECTION_STRING}" )
         metadata = [dict({"doc_name": str(doc_path)})]
 
         # Batch size
@@ -196,7 +200,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
                 embedding=self.embedder,
                 metadatas=metadata,
                 connection_string=MSSQL_CONNECTION_STRING,
-                embedding_length=768,
+                embedding_length=self.embedding_length,
                 table_name=TABLE_NAME,
             )
             if logflag:
@@ -234,7 +238,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
                     embedding=self.embedder,
                     metadatas=metadata,
                     connection_string=MSSQL_CONNECTION_STRING,
-                    embedding_length=768,
+                    embedding_length=self.embedding_length,
                     table_name=TABLE_NAME,
                 )
                 if logflag:
@@ -248,7 +252,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
     ):
         """Ingest files/links content into sqlserver database.
 
-        Save in the format of vector[768].
+        Save in the format of vector[].
         Returns '{"status": 200, "message": "Data preparation succeeded"}' if successful.
         Args:
             input (DataprepRequest): Model containing the following parameters:
@@ -283,7 +287,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
                     logger.info(f"Successfully saved file {save_path}")
             result = {"status": 200, "message": "Data preparation succeeded"}
             if logflag:
-                logger.info(result)
+                logger.info(f"{result}")
             return result
 
         if link_list:
@@ -296,7 +300,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
                     logger.info(f"Successfully saved link list {link_list}")
                 result = {"status": 200, "message": "Data preparation succeeded"}
                 if logflag:
-                    logger.info(result)
+                    logger.info(f"{result}")
                 return result
             except json.JSONDecodeError:
                 raise HTTPException(status_code=400, detail="Invalid JSON format for link_list.")
@@ -312,16 +316,16 @@ class OpeaSqlServerDataprep(OpeaComponent):
             "parent": "",
         }"""
         if logflag:
-            logger.info("[ dataprep - get file ] start to get file structure")
+            logger.info(f"[ dataprep - get file ] start to get file structure")
 
         if not Path(self.upload_folder).exists():
             if logflag:
-                logger.info("No file uploaded, return empty list.")
+                logger.info(f"No file uploaded, return empty list.")
             return []
 
         file_content = get_file_structure(self.upload_folder)
         if logflag:
-            logger.info(file_content)
+            logger.info(f"{file_content}")
         return file_content
 
     async def delete_files(self, file_path: str = Body(..., embed=True)):
@@ -333,11 +337,11 @@ class OpeaSqlServerDataprep(OpeaComponent):
         """
         if file_path == "all":
             if logflag:
-                logger.info("[dataprep - del] delete all files")
+                logger.info(f"[dataprep - del] delete all files")
             remove_folder_with_ignore(self.upload_folder)
             assert self.delete_embeddings(file_path)
             if logflag:
-                logger.info("[dataprep - del] successfully delete all files.")
+                logger.info(f"[dataprep - del] successfully delete all files.")
             create_upload_folder(self.upload_folder)
             if logflag:
                 logger.info({"status": True})
@@ -363,7 +367,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
             # delete folder
             else:
                 if logflag:
-                    logger.info("[dataprep - del] delete folder is not supported for now.")
+                    logger.info(f"[dataprep - del] delete folder is not supported for now.")
                     logger.info({"status": False})
                 return {"status": False}
             if logflag:
