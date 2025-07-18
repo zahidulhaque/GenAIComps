@@ -48,7 +48,7 @@ CHUNK_OVERLAP = os.getenv("CHUNK_OVERLAP", 100)
 
 @OpeaComponentRegistry.register("OPEA_DATAPREP_SQLSERVER")
 class OpeaSqlServerDataprep(OpeaComponent):
-    """Dataprep component for SqlServerVector ingestion and search services."""
+    """Dataprep component for SqlServer ingestion and search services."""
 
     def __init__(self, name: str, description: str, config: dict = None):
         super().__init__(name, ServiceType.DATAPREP.name.lower(), description, config)
@@ -104,7 +104,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
             logger.error("OpeaSqlServerDataprep health check failed.")
 
     def check_health(self) -> bool:
-        """Checks the health of the SqlServerVector service."""
+        """Checks the health of the SqlServer service."""
         try:
             conn = pyodbc.connect(MSSQL_CONNECTION_STRING)
             conn.close()
@@ -123,6 +123,16 @@ class OpeaSqlServerDataprep(OpeaComponent):
         pass
 
     async def save_file_to_local_disk(self, save_path: str, file: UploadFile):
+        """
+        Asynchronously saves the contents of an UploadFile to the specified local disk path.
+
+        Args:
+            save_path (str): The file system path where the file should be saved.
+            file (UploadFile): The file object to be saved; expected to have an async `read()` method.
+
+        Raises:
+            HTTPException: If writing the file fails, raises an HTTP 500 error with details.
+        """
         save_path = Path(save_path)
         with save_path.open("wb") as fout:
             try:
@@ -218,6 +228,17 @@ class OpeaSqlServerDataprep(OpeaComponent):
         return True
 
     async def ingest_link_to_sqlserver(self, link_list: List[str]):
+        """
+        Parses HTML content from a list of URLs, splits it into text chunks, and stores embeddings in SQL Server.
+
+        Args:
+            link_list (List[str]): URLs to process.
+
+        Returns:
+            bool: True if processing completes.
+
+        Logs errors and progress if enabled.
+        """
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, add_start_index=True, separators=get_separators()
         )
