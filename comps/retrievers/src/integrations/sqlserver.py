@@ -11,9 +11,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from comps import CustomLogger, EmbedDoc, OpeaComponent, OpeaComponentRegistry, ServiceType
 
-from .config import MSSQL_SERVER, MSSQL_DATABASE, MSSQL_USERNAME, MSSQL_SA_PASSWORD, TABLE_NAME, TEI_EMBEDDING_ENDPOINT, EMBED_MODEL, HF_TOKEN
-
-MSSQL_CONNECTION_STRING = f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={MSSQL_SERVER};DATABASE={MSSQL_DATABASE};UID={MSSQL_USERNAME};PWD={MSSQL_SA_PASSWORD};TrustServerCertificate=yes"
+from .config import MSSQL_CONNECTION_STRING, TABLE_NAME, TEI_EMBEDDING_ENDPOINT, EMBED_MODEL, HF_TOKEN
 
 logger = CustomLogger("sqlserver_retrievers")
 logflag = os.getenv("LOGFLAG", False)
@@ -114,7 +112,7 @@ class OpeaSqlServerRetriever(OpeaComponent):
             return True
 
         except pyodbc.Error as e:
-            logger.info("Error connecting to MS SQL")
+            logger.error("Error connecting to MS SQL")
 
         return False
 

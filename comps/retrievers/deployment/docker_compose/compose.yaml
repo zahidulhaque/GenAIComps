@@ -238,6 +238,16 @@ services:
       mariadb-server:
         condition: service_healthy
 
+  retriever-sqlserver:
+    extends: retriever
+    container_name: retriever-sqlserver
+    environment:
+      RETRIEVER_COMPONENT_NAME: ${RETRIEVER_COMPONENT_NAME:-OPEA_RETRIEVER_SQLSERVER}
+      MSSQL_CONNECTION_STRING: ${MSSQL_CONNECTION_STRING}
+    depends_on:
+      sqlserver-db:
+        condition: service_healthy
+
 networks:
   default:
     driver: bridge

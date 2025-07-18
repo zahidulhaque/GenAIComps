@@ -36,16 +36,10 @@ TEI_EMBEDDING_ENDPOINT = os.getenv("TEI_EMBEDDING_ENDPOINT", "")
 # Huggingface API token for TEI embedding endpoint
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN", "")
 
-MSSQL_SERVER = os.getenv("MSSQL_SERVER", "localhost,1433")
-MSSQL_DATABASE = os.getenv("MSSQL_DATABASE", "master")
-MSSQL_USERNAME = os.getenv("MSSQL_USERNAME", "sa")
-MSSQL_SA_PASSWORD = os.getenv("MSSQL_SA_PASSWORD")
-if not MSSQL_SA_PASSWORD:
-    raise EnvironmentError("Database credentials must be set in environment variables.")
+MSSQL_CONNECTION_STRING = os.getenv("MSSQL_CONNECTION_STRING")
+if not MSSQL_CONNECTION_STRING:
+    raise EnvironmentError("Database connection string must be set in environment variables.")
 TABLE_NAME = os.getenv("TABLE_NAME", "sqlserver_vectorstore")
-
-MSSQL_CONNECTION_STRING = f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={MSSQL_SERVER};DATABASE={MSSQL_DATABASE};UID={MSSQL_USERNAME};PWD={MSSQL_SA_PASSWORD};TrustServerCertificate=yes"
-
 
 # chunk parameters
 CHUNK_SIZE = os.getenv("CHUNK_SIZE", 1500)
@@ -117,18 +111,18 @@ class OpeaSqlServerDataprep(OpeaComponent):
             return True
         except pyodbc.Error as e:
             if logflag:
-                logger.info(f"Error connecting to MS SQL: {e}")
+                logger.error(f"Error connecting to MS SQL: {e}")
             return False
 
         except Exception as e:
             if logflag:
-                logger.info(f"An unexpected error occurred: {e}")
+                logger.error(f"An unexpected error occurred: {e}")
             return False
 
     def invoke(self, *args, **kwargs):
         pass
 
-    async def save_file_to_local_disk(self, save_path: str, file):
+    async def save_file_to_local_disk(self, save_path: str, file: UploadFile):
         save_path = Path(save_path)
         with save_path.open("wb") as fout:
             try:
@@ -136,7 +130,7 @@ class OpeaSqlServerDataprep(OpeaComponent):
                 fout.write(content)
             except Exception as e:
                 if logflag:
-                    logger.info(f"Write file failed. Exception: {e}")
+                    logger.error(f"Write file failed. Exception: {e}")
                 raise HTTPException(status_code=500, detail=f"Write file {save_path} failed. Exception: {e}")
 
     def delete_embeddings(self, doc_name):
@@ -147,15 +141,14 @@ class OpeaSqlServerDataprep(OpeaComponent):
             if logflag:
                 logger.info(f"Deleting {doc_name} from vectorstore")
 
-            vector_store = SQLServer_VectorStore(
-                embedding_function=self.embedder,
-                connection_string=MSSQL_CONNECTION_STRING,
-                embedding_length=self.embedding_length,
-                table_name=TABLE_NAME,
-            )
-
             if doc_name == "all":
                 # Drop the entire table (removes all embeddings)
+                vector_store = SQLServer_VectorStore(
+                    embedding_function=self.embedder,
+                    connection_string=MSSQL_CONNECTION_STRING,
+                    embedding_length=self.embedding_length,
+                    table_name=TABLE_NAME,
+                )
                 vector_store.drop()
             else:
                 try:
@@ -173,11 +166,11 @@ class OpeaSqlServerDataprep(OpeaComponent):
                         logger.info(f"Row(s) with doc_name = '{doc_name}' deleted successfully.")
 
                 except pyodbc.Error as e:
-                    logger.info(f"Error while connecting or executing query: {e}")
+                    logger.error(f"Error while connecting or executing query: {e}")
                     return False
             return True
         except Exception as e:
-            logger.info(f"Error during deletion: {e}")
+            logger.error(f"Error during deletion: {e}")
             return False
 
 
@@ -203,7 +196,6 @@ class OpeaSqlServerDataprep(OpeaComponent):
 
         if logflag:
             logger.info(f"Done preprocessing. Created {len(chunks)} chunks of the original file.")
-            logger.info(f"SQL Server Connection: {MSSQL_CONNECTION_STRING}" )
         metadata = [dict({"doc_name": str(doc_path)})]
 
         # Batch size
@@ -231,36 +223,39 @@ class OpeaSqlServerDataprep(OpeaComponent):
         )
 
         for link in link_list:
-            texts = []
-            content = parse_html_new([link], chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-            if logflag:
-                logger.info(f"[ ingest link ] link: {link} content: {content}")
-            encoded_link = encode_filename(link)
-            save_path = self.upload_folder + encoded_link + ".txt"
-            doc_path = self.upload_folder + link + ".txt"
-            if logflag:
-                logger.info(f"[ ingest link ] save_path: {save_path}")
-            await save_content_to_local_disk(save_path, content)
-            metadata = [dict({"doc_name": str(doc_path)})]
-
-            chunks = text_splitter.split_text(content)
-
-            batch_size = 32
-            num_chunks = len(chunks)
-            for i in range(0, num_chunks, batch_size):
-                batch_chunks = chunks[i : i + batch_size]
-                batch_texts = batch_chunks
-
-                _ = SQLServer_VectorStore.from_texts(
-                    texts=batch_texts,
-                    embedding=self.embedder,
-                    metadatas=metadata,
-                    connection_string=MSSQL_CONNECTION_STRING,
-                    embedding_length=self.embedding_length,
-                    table_name=TABLE_NAME,
-                )
+            try:
+                content = parse_html_new([link], chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
                 if logflag:
-                    logger.info(f"Processed batch {i//batch_size + 1}/{(num_chunks-1)//batch_size + 1}")
+                    logger.info(f"[ ingest link ] link: {link} content: {content}")
+                encoded_link = encode_filename(link)
+                save_path = self.upload_folder + encoded_link + ".txt"
+                doc_path = self.upload_folder + link + ".txt"
+                if logflag:
+                    logger.info(f"[ ingest link ] save_path: {save_path}")
+                await save_content_to_local_disk(save_path, content)
+                metadata = [dict({"doc_name": str(doc_path)})]
+
+                chunks = text_splitter.split_text(content)
+
+                batch_size = 32
+                num_chunks = len(chunks)
+                for i in range(0, num_chunks, batch_size):
+                    batch_chunks = chunks[i : i + batch_size]
+                    batch_texts = batch_chunks
+
+                    SQLServer_VectorStore.from_texts(
+                        texts=batch_texts,
+                        embedding=self.embedder,
+                        metadatas=metadata,
+                        connection_string=MSSQL_CONNECTION_STRING,
+                        embedding_length=self.embedding_length,
+                        table_name=TABLE_NAME,
+                    )
+                    if logflag:
+                        logger.info(f"Processed batch {i//batch_size + 1}/{(num_chunks-1)//batch_size + 1}")
+
+            except Exception as e:
+                logger.error(f"Failed to ingest link {link}: {e}")
 
         return True
 
@@ -379,8 +374,8 @@ class OpeaSqlServerDataprep(OpeaComponent):
                     delete_path.unlink()
                 except Exception as e:
                     if logflag:
-                        logger.info(f"[dataprep - del] fail to delete file {delete_path}: {e}")
-                        logger.info({"status": False})
+                        logger.error(f"[dataprep - del] fail to delete file {delete_path}: {e}")
+                        logger.error({"status": False})
                     return {"status": False}
             # delete folder
             else:
