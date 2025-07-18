@@ -39,7 +39,9 @@ HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN", "")
 MSSQL_SERVER = os.getenv("MSSQL_SERVER", "localhost,1433")
 MSSQL_DATABASE = os.getenv("MSSQL_DATABASE", "master")
 MSSQL_USERNAME = os.getenv("MSSQL_USERNAME", "sa")
-MSSQL_SA_PASSWORD = os.getenv("MSSQL_SA_PASSWORD", "password")
+MSSQL_SA_PASSWORD = os.getenv("MSSQL_SA_PASSWORD")
+if not MSSQL_SA_PASSWORD:
+    raise EnvironmentError("Database credentials must be set in environment variables.")
 TABLE_NAME = os.getenv("TABLE_NAME", "sqlserver_vectorstore")
 
 MSSQL_CONNECTION_STRING = f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={MSSQL_SERVER};DATABASE={MSSQL_DATABASE};UID={MSSQL_USERNAME};PWD={MSSQL_SA_PASSWORD};TrustServerCertificate=yes"
@@ -66,25 +68,41 @@ class OpeaSqlServerDataprep(OpeaComponent):
                 )
             import requests
 
-            response = requests.get(TEI_EMBEDDING_ENDPOINT + "/info")
-            if response.status_code != 200:
+            logger.info(f"Attempting to contact TEI embedding endpoint: {TEI_EMBEDDING_ENDPOINT}/info")
+            try:
+                response = requests.get(TEI_EMBEDDING_ENDPOINT + "/info")
+                if response.status_code != 200:
+                    raise HTTPException(
+                        status_code=400, detail=f"TEI embedding endpoint {TEI_EMBEDDING_ENDPOINT} is not available."
+                    )
+                model_id = response.json()["model_id"]
+                logger.info(f"Using TEI embedding model: {model_id} from endpoint: {TEI_EMBEDDING_ENDPOINT}")
+
+            except requests.RequestException as e:
+                logger.error(f"Failed to contact TEI embedding endpoint: {TEI_EMBEDDING_ENDPOINT}. Error: {e}")
                 raise HTTPException(
-                    status_code=400, detail=f"TEI embedding endpoint {TEI_EMBEDDING_ENDPOINT} is not available."
+                    status_code=400,
+                    detail=f"TEI embedding endpoint {TEI_EMBEDDING_ENDPOINT} is not available or returned an error.",
                 )
-            model_id = response.json()["model_id"]
             # create embeddings using TEI endpoint service
             self.embedder = HuggingFaceInferenceAPIEmbeddings(
                 api_key=HF_TOKEN, model_name=model_id, api_url=TEI_EMBEDDING_ENDPOINT
             )
         else:
             # create embeddings using local embedding model
+            logger.info(f"Using local embedding model: {EMBED_MODEL}")
             self.embedder = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
 
-        embedding = self.embedder.embed_documents(["Test input text to get embedding size"])
-        if not embedding or not isinstance(embedding[0], list):
-            raise ValueError("Embedding generation failed or invalid format.")
-        self.embedding_length = len(embedding[0])
-        logger.info(f"Embedding Length of the model: {self.embedding_length}")
+        # Determine embedding length.
+        try:
+            embedding = self.embedder.embed_documents(["Test input text to get embedding size"])
+            if not embedding or not isinstance(embedding[0], list):
+                raise ValueError("Embedding generation returned an unexpected format.")
+            self.embedding_length = len(embedding[0])
+            logger.info(f"Embedding Length of the model: {self.embedding_length}")
+        except Exception as e:
+            logger.error(f"Failed to generate embedding for model '{EMBED_MODEL}': {e}")
+            raise RuntimeError("Embedding initialization failed. Please check the model configuration and embedding service.")
 
         # Perform health check
         health_status = self.check_health()

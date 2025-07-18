@@ -19,7 +19,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends --fix-missin
     poppler-utils \
     tesseract-ocr \
     ffmpeg \
-    wget curl
+    curl
 
 # Add Microsoft package repo
 RUN DEBIAN_VERSION=$(grep VERSION_ID /etc/os-release | cut -d '"' -f 2 | cut -d '.' -f 1) && \

@@ -14,12 +14,6 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends --fix-missin
     build-essential \
     curl
 
-# Check Debian version and fail if unsupported
-# RUN DEBIAN_VERSION=$(grep VERSION_ID /etc/os-release | cut -d '"' -f 2 | cut -d '.' -f 1) && \
-#     if ! echo "11 12" | grep -qw "$DEBIAN_VERSION"; then \
-#         echo "Debian $DEBIAN_VERSION is not currently supported." && exit 1; \
-#     fi
-
 # Add Microsoft package repo
 RUN DEBIAN_VERSION=$(grep VERSION_ID /etc/os-release | cut -d '"' -f 2 | cut -d '.' -f 1) && \
     curl -sSL -O https://packages.microsoft.com/config/debian/$DEBIAN_VERSION/packages-microsoft-prod.deb && \

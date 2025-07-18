@@ -5,7 +5,7 @@ import os
 import pyodbc
 
 from fastapi import HTTPException
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings, HuggingFaceInferenceAPIEmbeddings
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from langchain_sqlserver.vectorstores import SQLServer_VectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -50,12 +50,23 @@ class OpeaSqlServerRetriever(OpeaComponent):
                 )
             import requests
 
-            response = requests.get(TEI_EMBEDDING_ENDPOINT + "/info")
-            if response.status_code != 200:
+            logger.info(f"Attempting to contact TEI embedding endpoint: {TEI_EMBEDDING_ENDPOINT}/info")
+            try:
+                response = requests.get(TEI_EMBEDDING_ENDPOINT + "/info")
+                if response.status_code != 200:
+                    raise HTTPException(
+                        status_code=400, detail=f"TEI embedding endpoint {TEI_EMBEDDING_ENDPOINT} is not available."
+                    )
+                model_id = response.json()["model_id"]
+                logger.info(f"Using TEI embedding model: {model_id} from endpoint: {TEI_EMBEDDING_ENDPOINT}")
+
+            except requests.RequestException as e:
+                logger.error(f"Failed to contact TEI embedding endpoint: {TEI_EMBEDDING_ENDPOINT}. Error: {e}")
                 raise HTTPException(
-                    status_code=400, detail=f"TEI embedding endpoint {TEI_EMBEDDING_ENDPOINT} is not available."
+                    status_code=400,
+                    detail=f"TEI embedding endpoint {TEI_EMBEDDING_ENDPOINT} is not available or returned an error.",
                 )
-            model_id = response.json()["model_id"]
+
             embeddings = HuggingFaceInferenceAPIEmbeddings(
                 api_key=HF_TOKEN, model_name=model_id, api_url=TEI_EMBEDDING_ENDPOINT
             )
@@ -64,6 +75,18 @@ class OpeaSqlServerRetriever(OpeaComponent):
             if logflag:
                 logger.info(f"[ init embedder ] LOCAL_EMBEDDING_MODEL:{EMBED_MODEL}")
             embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+
+        # Determine embedding length.
+        try:
+            embedding = embeddings.embed_documents(["Test input text to get embedding size"])
+            if not embedding or not isinstance(embedding[0], list):
+                raise ValueError("Embedding generation returned an unexpected format.")
+            self.embedding_length = len(embedding[0])
+            logger.info(f"Embedding Length of the model: {self.embedding_length}")
+        except Exception as e:
+            logger.error(f"Failed to generate embedding for model '{EMBED_MODEL}': {e}")
+            raise RuntimeError("Embedding initialization failed. Please check the model configuration and embedding service.")
+
         return embeddings
 
     def _initialize_client(self) -> SQLServer_VectorStore:
@@ -72,7 +95,7 @@ class OpeaSqlServerRetriever(OpeaComponent):
             embedding_function=self.embedder,
             table_name=self.sqlserver_table_name,
             connection_string=self.MSSQL_CONNECTION_STRING,
-            embedding_length=768
+            embedding_length=self.embedding_length
         )
         return vector_db
 
@@ -89,15 +112,11 @@ class OpeaSqlServerRetriever(OpeaComponent):
             conn.close()
             logger.info(f"[ check health ] Successfully connected to SQL Server!")
             return True
-        except pyodbc.Error as e:
-            if logflag:
-                logger.info(f"Error connecting to MS SQL: {e}")
-            return False
 
-        except Exception as e:
-            if logflag:
-                logger.info(f"An unexpected error occurred: {e}")
-            return False
+        except pyodbc.Error as e:
+            logger.info("Error connecting to MS SQL")
+
+        return False
 
     async def invoke(self, input: EmbedDoc) -> list:
         """Search the SQLServer index for the most similar documents to the input query.
